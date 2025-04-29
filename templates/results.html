@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Результаты анализа</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+    <div class="container">
+        <h1>Топ-50 слов по IDF</h1>
+        {{ table|safe }}
+        <a href="{{ url_for('index') }}" class="btn">Назад</a>
+    </div>
+</body>
+
+</html>

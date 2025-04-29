@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Анализ TF-IDF</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+    <div class="container">
+        <h1>Загрузка текстового файла</h1>
+        <form method="POST" enctype="multipart/form-data">
+            <div class="form-group">
+                <input type="file" name="file" accept=".txt" required>
+            </div>
+            <button type="submit" class="btn">Анализировать</button>
+        </form>
+    </div>
+</body>
+
+</html>
