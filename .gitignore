@@ -1,3 +1,27 @@
+# Virtual Environment
+venv/
+
+# Flask
+instance/
+.webassets-cache
+uploads/
+data/
+
+# Python
+*.pyc
+__pycache__/
+*.py[cod]
+
+# IDE
+.idea/
+.vscode/
+.DS_Store
+
+# Логи и БД
+*.log
+*.sqlite
+*.sqlite-journal
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
