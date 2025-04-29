@@ -5,7 +5,7 @@ body {
 }
 
 .container {
-    max-width: 800px;
+    max-width: 900px;
     margin: 0 auto;
     background: white;
     padding: 20px;
@@ -47,4 +47,26 @@ tr:hover {
 
 .form-group {
     margin: 20px 0;
+}
+
+.pagination {
+    margin: 20px 0;
+    text-align: center;
+}
+
+.pagination a,
+.pagination span {
+    display: inline-block;
+    padding: 8px 12px;
+    margin: 0 2px;
+    border-radius: 4px;
+    background: #eee;
+    color: #333;
+    text-decoration: none;
+}
+
+.pagination .active {
+    background: #a24caf;
+    color: #fff;
+    font-weight: bold;
 }

@@ -8,10 +8,79 @@
 
 <body>
     <div class="container">
-        <h1>Топ-50 слов по IDF</h1>
+        <h1>Топ-слова по IDF</h1>
+        <div style="margin-bottom: 10px;">
+            <input type="text" id="searchWord" placeholder="Поиск по слову...">
+            <input type="number" id="minTF" placeholder="Мин. TF" style="width:90px;">
+            <input type="number" id="minIDF" placeholder="Мин. IDF" step="0.01" style="width:90px;">
+            <button onclick="filterTable()">Фильтровать</button>
+            <button onclick="resetFilter()">Сбросить</button>
+            <a href="{{ url_for('download_csv') }}" class="btn" style="float:right;">Скачать CSV</a>
+        </div>
         {{ table|safe }}
+
+        {% if pages > 1 %}
+        <div class="pagination">
+            {% for p in range(1, pages+1) %}
+            {% if p == page %}
+            <span class="active">{{ p }}</span>
+            {% else %}
+            <a href="{{ url_for('results', page=p) }}">{{ p }}</a>
+            {% endif %}
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <h2>Визуализация</h2>
+        <div style="display: flex; gap: 30px;">
+            <div>
+                <h3>Облако слов</h3>
+                {% if wordcloud_img %}
+                <img src="data:image/png;base64,{{ wordcloud_img }}" alt="Wordcloud">
+                {% else %}
+                <p>Недостаточно данных для отображения облака слов.</p>
+                {% endif %}
+            </div>
+            <div>
+                <h3>Топ-10 по TF</h3>
+                {% if barchart_img %}
+                <img src="data:image/png;base64,{{ barchart_img }}" alt="Bar Chart">
+                {% else %}
+                <p>Недостаточно данных для построения графика.</p>
+                {% endif %}
+            </div>
+        </div>
         <a href="{{ url_for('index') }}" class="btn">Назад</a>
     </div>
+    <script>
+        function filterTable() {
+            let word = document.getElementById('searchWord').value.toLowerCase();
+            let minTF = parseInt(document.getElementById('minTF').value) || 0;
+            let minIDF = parseFloat(document.getElementById('minIDF').value) || 0;
+            let table = document.querySelector('table');
+            for (let row of table.rows) {
+                if (row.rowIndex === 0) continue;
+                let w = row.cells[0].innerText.toLowerCase();
+                let tf = parseInt(row.cells[1].innerText);
+                let idf = parseFloat(row.cells[2].innerText.replace(',', '.'));
+                let show = true;
+                if (word && !w.includes(word)) show = false;
+                if (tf < minTF) show = false;
+                if (idf < minIDF) show = false;
+                row.style.display = show ? '' : 'none';
+            }
+        }
+        function resetFilter() {
+            document.getElementById('searchWord').value = '';
+            document.getElementById('minTF').value = '';
+            document.getElementById('minIDF').value = '';
+            let table = document.querySelector('table');
+            for (let row of table.rows) {
+                if (row.rowIndex === 0) continue;
+                row.style.display = '';
+            }
+        }
+    </script>
 </body>
 
 </html>
