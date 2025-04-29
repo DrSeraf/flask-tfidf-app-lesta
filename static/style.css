@@ -27,7 +27,7 @@ td {
 }
 
 th {
-    background-color: #4CAF50;
+    background-color: #a24caf;
     color: white;
 }
 
@@ -38,7 +38,7 @@ tr:hover {
 .btn {
     display: inline-block;
     padding: 10px 20px;
-    background: #4CAF50;
+    background: #a24caf;
     color: white;
     text-decoration: none;
     border-radius: 5px;
