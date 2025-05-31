@@ -78,7 +78,7 @@ def plot_wordcloud(df):
     if df.empty:
         return ""
     # Путь к кириллическому шрифту, например, Arial
-    font_path = os.path.join('static', 'arial.ttf')
+    font_path = os.environ.get('FONT_PATH', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf')
     if not os.path.exists(font_path):
         font_path = None  # Оставить по умолчанию, если нет arial.ttf
     wc = WordCloud(width=600, height=300, background_color='white', font_path=font_path)
@@ -155,4 +155,5 @@ def download_csv():
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=True)
+
