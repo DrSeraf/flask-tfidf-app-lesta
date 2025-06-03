@@ -1,33 +1,62 @@
-import matplotlib
-matplotlib.use('Agg')  
-from flask import Flask, render_template, request, redirect, url_for, session, send_file
-from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
-import pandas as pd
 import os
 import re
+import time
+from datetime import datetime
+
+from flask import Flask, render_template, request, redirect, url_for, session, send_file, jsonify
+from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
+import pandas as pd
+from io import BytesIO
+import base64
+from wordcloud import WordCloud
+from matplotlib import pyplot as plt
 import nltk
 from nltk.corpus import stopwords
 from corpus import CORPUS
-import math
-from io import StringIO, BytesIO
-import base64
-from wordcloud import WordCloud
-from matplotlib import pyplot as plt  # ← Изменённый импорт
 
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.sql import func
+from dotenv import load_dotenv
 
-# NLTK init
+# Загрузка переменных окружения из .env
+load_dotenv()
+
+# --- Конфигурируемые параметры ---
+FLASK_RUN_PORT = int(os.getenv('FLASK_RUN_PORT', 5000))
+SQLITE_DB_PATH = os.getenv('SQLITE_DB_PATH', 'app_database.db')
+FLASK_SECRET_KEY = os.getenv('FLASK_SECRET_KEY', 'supersecret')
+FONT_PATH = os.getenv('FONT_PATH', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf')
+APP_VERSION = os.getenv('APP_VERSION', 'dev')
+UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'Uploads')
+MAX_CONTENT_LENGTH = int(os.getenv('MAX_CONTENT_LENGTH', 2 * 1024 * 1024))
+PAGE_SIZE = int(os.getenv('PAGE_SIZE', 15))
+
+# --- Flask и БД ---
+app = Flask(__name__)
+app.secret_key = FLASK_SECRET_KEY
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
+app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{SQLITE_DB_PATH}'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db = SQLAlchemy(app)
+
+# --- Модель для истории загрузок ---
+class UploadHistory(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    filename = db.Column(db.String(120))
+    processed_at = db.Column(db.DateTime, default=datetime.utcnow)
+    processing_time = db.Column(db.Float)  # в миллисекундах
+    document_size = db.Column(db.Integer)
+
+with app.app_context():
+    db.create_all()
+
+# --- NLTK ---
 nltk.download('stopwords')
 stop_words = set(stopwords.words('russian'))
 
-app = Flask(__name__)
-app.secret_key = 'supersecret'
-app.config['UPLOAD_FOLDER'] = 'Uploads'
-app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024
-
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-
-PAGE_SIZE = 15
-
+# --- Векторизаторы ---
 def preprocess(text):
     text = text.lower()
     text = re.sub(r'[^\w\s]', '', text)
@@ -77,10 +106,7 @@ def calculate_tfidf(text):
 def plot_wordcloud(df):
     if df.empty:
         return ""
-    # Путь к кириллическому шрифту, например, Arial
-    font_path = os.environ.get('FONT_PATH', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf')
-    if not os.path.exists(font_path):
-        font_path = None  # Оставить по умолчанию, если нет arial.ttf
+    font_path = FONT_PATH if os.path.exists(FONT_PATH) else None
     wc = WordCloud(width=600, height=300, background_color='white', font_path=font_path)
     freqs = {row['Слово']: row['TF'] for _, row in df.iterrows()}
     img = wc.generate_from_frequencies(freqs)
@@ -110,10 +136,23 @@ def index():
             return redirect(request.url)
         if file and allowed_file(file.filename):
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+            os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
             file.save(filepath)
             with open(filepath, 'r', encoding='utf-8') as f:
                 text = f.read()
+            start_time = time.time()
             df = calculate_tfidf(text)
+            processing_time = (time.time() - start_time) * 1000  # ms
+
+            # Сохраняем в БД
+            record = UploadHistory(
+                filename=file.filename,
+                processing_time=processing_time,
+                document_size=len(text)
+            )
+            db.session.add(record)
+            db.session.commit()
+
             session['df'] = df.to_json(orient='split', force_ascii=False)
             return redirect(url_for('results', page=1))
     return render_template('index.html')
@@ -123,7 +162,7 @@ def results():
     df = pd.read_json(session.get('df'), orient='split')
     total = len(df)
     page = int(request.args.get('page', 1))
-    pages = math.ceil(total / PAGE_SIZE) if total > PAGE_SIZE else 1
+    pages = (total + PAGE_SIZE - 1) // PAGE_SIZE if total > PAGE_SIZE else 1
     if total > PAGE_SIZE:
         df_page = df.iloc[(page-1)*PAGE_SIZE:page*PAGE_SIZE]
     else:
@@ -139,13 +178,9 @@ def results():
 @app.route('/download_csv')
 def download_csv():
     df = pd.read_json(session.get('df'), orient='split')
-    
-    # Создаём BytesIO вместо StringIO
     buffer = BytesIO()
-    # Сохраняем CSV в бинарном режиме с указанием кодировки
     df.to_csv(buffer, index=False, encoding='utf-8')
-    buffer.seek(0)  # Сбрасываем позицию в начало
-    
+    buffer.seek(0)
     return send_file(
         buffer,
         mimetype='text/csv; charset=utf-8',
@@ -153,7 +188,34 @@ def download_csv():
         download_name='tfidf_results.csv'
     )
 
+# --- API endpoints ---
+
+@app.route('/status')
+def status():
+    try:
+        # Проверка соединения с БД
+        db.session.execute('SELECT 1')
+        return jsonify({"status": "OK"})
+    except Exception as e:
+        return jsonify({"status": "ERROR", "detail": str(e)}), 500
+
+@app.route('/metrics')
+def metrics():
+    try:
+        processed_docs = db.session.query(UploadHistory).count()
+        avg_time = db.session.query(func.avg(UploadHistory.processing_time)).scalar() or 0
+        avg_doc_size = db.session.query(func.avg(UploadHistory.document_size)).scalar() or 0
+        return jsonify({
+            "processed_documents": processed_docs,
+            "average_processing_time_ms": round(avg_time, 2),
+            "average_document_size_chars": round(avg_doc_size, 2)
+        })
+    except Exception as e:
+        return jsonify({"status": "ERROR", "detail": str(e)}), 500
+
+@app.route('/version')
+def version():
+    return jsonify({"version": APP_VERSION})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
-
+    app.run(host='0.0.0.0', port=FLASK_RUN_PORT, debug=True)

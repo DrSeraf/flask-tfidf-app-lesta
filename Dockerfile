@@ -1,7 +1,11 @@
-# Используем мультиархитектурный базовый образ
-FROM --platform=$BUILDPLATFORM python:3.11-slim
+# Используем официальный Python-образ
+FROM python:3.11-slim
 
-# Устанавливаем системные зависимости для всех архитектур
+# Устанавливаем переменные окружения для Python
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+
+# Устанавливаем системные зависимости
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     build-essential \
@@ -12,22 +16,29 @@ RUN apt-get update && \
     fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
-# Устанавливаем рабочую директорию
+# Создаём рабочую директорию
 WORKDIR /app
 
-# Копируем файлы приложения
-COPY . .
+# Копируем зависимости
+COPY requirements.txt requirements.txt
 
 # Устанавливаем зависимости Python
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Загружаем ресурсы NLTK
+# Копируем все файлы приложения
+COPY . .
+
+# Копируем .env файл (если вы хотите, чтобы он попадал в контейнер)
+# Если переменные окружения будут передаваться через docker run --env-file, эту строку можно убрать
+COPY .env .env
+
+# Загружаем ресурсы NLTK (стоп-слова)
 RUN python -m nltk.downloader stopwords
 
-# Используем системный шрифт DejaVu для кириллицы
+# Указываем переменную окружения для шрифта
 ENV FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
 
-# Открываем порт 5000
+# Открываем порт (по умолчанию 5000, но можно изменить через .env)
 EXPOSE 5000
 
 # Запускаем приложение
