@@ -45,6 +45,16 @@ flask-tfidf-app/
 │ ├── index.html # Главная страница
 │ └── results.html # Страница с результатами анализа
 └── Uploads/ # Папка для загруженных файлов
+**Описание структуры:**
+
+- **app.py** — основной исполняемый файл Flask-приложения.
+- **corpus.py** — модуль для работы с корпусом документов и расчёта IDF.
+- **Dockerfile** — файл для контейнеризации приложения.
+- **requirements.txt** — список зависимостей Python.
+- **templates/** — папка с HTML-шаблонами для веб-интерфейса:
+  - `index.html` — главная страница загрузки.
+  - `results.html` — страница отображения результатов анализа.
+- **Uploads/** — директория для хранения загруженных пользователями файлов.
 
 
 # Запуск приложения
@@ -53,10 +63,8 @@ flask-tfidf-app/
 
 1. Установите зависимости:
 pip install -r requirements.txt
-text
 2. Запустите приложение:
 python app.py
-text
 3. Приложение будет доступно по адресу: [http://localhost:5000](http://localhost:5000)
 
 ---
@@ -65,10 +73,8 @@ text
 
 1. Соберите образ:
 docker build -t tfidf-analyzer .
-text
 2. Запустите контейнер:
 docker run -p 5000:5000 tfidf-analyzer
-text
 3. Приложение будет доступно по адресу: [http://localhost:5000](http://localhost:5000)
 
 ---
@@ -96,7 +102,6 @@ text
 ### GET `/status`
 Возвращает статус приложения:
 {"status": "OK"}
-text
 
 ### GET `/metrics`
 Возвращает метрики приложения:
@@ -105,7 +110,6 @@ text
 "processed_words_total": 0,
 "average_processing_time_ms": 0
 }
-text
 - `uploaded_files_count` — общее количество обработанных файлов
 - `processed_words_total` — общее количество обработанных слов
 - `average_processing_time_ms` — среднее время обработки файла в миллисекундах
@@ -113,7 +117,6 @@ text
 ### GET `/version`
 Возвращает версию приложения:
 {"version": "1.1.0"}
-text
 
 ---
 
@@ -170,7 +173,6 @@ text
 
 **Формула TF-IDF:**
 TF-IDF = TF * IDF
-text
 где:
 - **TF** (Term Frequency) — частота термина в документе
 - **IDF** (Inverse Document Frequency) — обратная частота документа (логарифм общего числа документов, делённый на количество документов, содержащих термин)
