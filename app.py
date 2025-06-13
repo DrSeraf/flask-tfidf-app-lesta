@@ -7,9 +7,6 @@ from flask import Flask, render_template, request, redirect, url_for, session, s
 from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 import pandas as pd
 from io import BytesIO
-import base64
-from wordcloud import WordCloud
-from matplotlib import pyplot as plt
 import nltk
 from nltk.corpus import stopwords
 from corpus import CORPUS
@@ -18,6 +15,8 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.sql import func
 from dotenv import load_dotenv
 
+from flasgger import Swagger
+
 # Загрузка переменных окружения из .env
 load_dotenv()
 
@@ -25,7 +24,6 @@ load_dotenv()
 FLASK_RUN_PORT = int(os.getenv('FLASK_RUN_PORT', 5000))
 SQLITE_DB_PATH = os.getenv('SQLITE_DB_PATH', 'app_database.db')
 FLASK_SECRET_KEY = os.getenv('FLASK_SECRET_KEY', 'supersecret')
-FONT_PATH = os.getenv('FONT_PATH', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf')
 APP_VERSION = os.getenv('APP_VERSION', 'dev')
 UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'Uploads')
 MAX_CONTENT_LENGTH = int(os.getenv('MAX_CONTENT_LENGTH', 2 * 1024 * 1024))
@@ -40,6 +38,9 @@ app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{SQLITE_DB_PATH}'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
+
+# --- Flasgger ---
+swagger = Swagger(app)
 
 # --- Модель для истории загрузок ---
 class UploadHistory(db.Model):
@@ -103,31 +104,27 @@ def calculate_tfidf(text):
     df = df.sort_values('IDF', ascending=False)
     return df
 
-def plot_wordcloud(df):
-    if df.empty:
-        return ""
-    font_path = FONT_PATH if os.path.exists(FONT_PATH) else None
-    wc = WordCloud(width=600, height=300, background_color='white', font_path=font_path)
-    freqs = {row['Слово']: row['TF'] for _, row in df.iterrows()}
-    img = wc.generate_from_frequencies(freqs)
-    buf = BytesIO()
-    img.to_image().save(buf, format='PNG')
-    return base64.b64encode(buf.getvalue()).decode()
-
-def plot_barchart(df):
-    if df.empty:
-        return ""
-    plt.figure(figsize=(8, 3))
-    plt.bar(df['Слово'][:10], df['TF'][:10], color='#a24caf')
-    plt.xticks(rotation=45, ha='right')
-    plt.tight_layout()
-    buf = BytesIO()
-    plt.savefig(buf, format='PNG')
-    plt.close()
-    return base64.b64encode(buf.getvalue()).decode()
-
 @app.route('/', methods=['GET', 'POST'])
 def index():
+    """
+    Главная страница загрузки файла
+    ---
+    tags:
+      - Web
+    consumes:
+      - multipart/form-data
+    parameters:
+      - name: file
+        in: formData
+        type: file
+        required: true
+        description: Текстовый файл .txt для анализа
+    responses:
+      200:
+        description: Успешная загрузка и анализ файла
+      400:
+        description: Ошибка загрузки файла
+    """
     if request.method == 'POST':
         if 'file' not in request.files:
             return redirect(request.url)
@@ -159,7 +156,23 @@ def index():
 
 @app.route('/results')
 def results():
-    df = pd.read_json(session.get('df'), orient='split')
+    """
+    Результаты анализа TF-IDF
+    ---
+    tags:
+      - Web
+    parameters:
+      - name: page
+        in: query
+        type: integer
+        required: false
+        description: Номер страницы
+    responses:
+      200:
+        description: HTML страница с результатами
+    """
+    import io
+    df = pd.read_json(io.StringIO(session.get('df')), orient='split')
     total = len(df)
     page = int(request.args.get('page', 1))
     pages = (total + PAGE_SIZE - 1) // PAGE_SIZE if total > PAGE_SIZE else 1
@@ -167,17 +180,26 @@ def results():
         df_page = df.iloc[(page-1)*PAGE_SIZE:page*PAGE_SIZE]
     else:
         df_page = df
-    wordcloud_img = plot_wordcloud(df)
-    barchart_img = plot_barchart(df)
     return render_template('results.html',
                            table=df_page.to_html(classes='table table-striped', index=False),
                            page=page, pages=pages, total=total,
-                           wordcloud_img=wordcloud_img,
-                           barchart_img=barchart_img)
+                           wordcloud_img=None, barchart_img=None)
 
 @app.route('/download_csv')
 def download_csv():
-    df = pd.read_json(session.get('df'), orient='split')
+    """
+    Скачать результаты анализа в CSV
+    ---
+    tags:
+      - Web
+    responses:
+      200:
+        description: CSV-файл с результатами
+        schema:
+          type: file
+    """
+    import io
+    df = pd.read_json(io.StringIO(session.get('df')), orient='split')
     buffer = BytesIO()
     df.to_csv(buffer, index=False, encoding='utf-8')
     buffer.seek(0)
@@ -192,8 +214,32 @@ def download_csv():
 
 @app.route('/status')
 def status():
+    """
+    Проверка статуса сервиса
+    ---
+    tags:
+      - API
+    responses:
+      200:
+        description: Сервис работает
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: OK
+      500:
+        description: Ошибка соединения с БД
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: ERROR
+            detail:
+              type: string
+    """
     try:
-        # Проверка соединения с БД
         db.session.execute('SELECT 1')
         return jsonify({"status": "OK"})
     except Exception as e:
@@ -201,6 +247,37 @@ def status():
 
 @app.route('/metrics')
 def metrics():
+    """
+    Метрики обработки файлов
+    ---
+    tags:
+      - API
+    responses:
+      200:
+        description: Метрики обработки
+        schema:
+          type: object
+          properties:
+            processed_documents:
+              type: integer
+              example: 10
+            average_processing_time_ms:
+              type: number
+              example: 123.45
+            average_document_size_chars:
+              type: number
+              example: 1000
+      500:
+        description: Ошибка получения метрик
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: ERROR
+            detail:
+              type: string
+    """
     try:
         processed_docs = db.session.query(UploadHistory).count()
         avg_time = db.session.query(func.avg(UploadHistory.processing_time)).scalar() or 0
@@ -215,7 +292,22 @@ def metrics():
 
 @app.route('/version')
 def version():
+    """
+    Получить версию приложения
+    ---
+    tags:
+      - API
+    responses:
+      200:
+        description: Версия приложения
+        schema:
+          type: object
+          properties:
+            version:
+              type: string
+              example: "1.0.0"
+    """
     return jsonify({"version": APP_VERSION})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=FLASK_RUN_PORT, debug=True)
+    app.run(host='0.0.0.0', port=5005, debug=True)
