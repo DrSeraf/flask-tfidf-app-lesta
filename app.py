@@ -15,6 +15,9 @@ from flasgger.utils import swag_from
 from sklearn.feature_extraction.text import TfidfVectorizer
 import pandas as pd
 import numpy as np
+from collections import defaultdict
+import heapq
+import json
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -69,6 +72,76 @@ class CollectionDocument(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     collection_id = db.Column(db.String(36), db.ForeignKey('collection.id'), nullable=False)
     document_id = db.Column(db.String(36), db.ForeignKey('document.id'), nullable=False)
+
+# Классы и функции для кодирования Хаффмана
+class HuffmanNode:
+    def __init__(self, char=None, freq=0, left=None, right=None):
+        self.char = char
+        self.freq = freq
+        self.left = left
+        self.right = right
+    
+    def __lt__(self, other):
+        return self.freq < other.freq
+
+def build_frequency_dict(text):
+    frequency = defaultdict(int)
+    for char in text:
+        frequency[char] += 1
+    return frequency
+
+def build_huffman_tree(frequency):
+    heap = []
+    for char, freq in frequency.items():
+        heapq.heappush(heap, HuffmanNode(char=char, freq=freq))
+    
+    while len(heap) > 1:
+        left = heapq.heappop(heap)
+        right = heapq.heappop(heap)
+        merged = HuffmanNode(freq=left.freq + right.freq, left=left, right=right)
+        heapq.heappush(heap, merged)
+    
+    return heapq.heappop(heap) if heap else None
+
+def build_codes(root, current_code="", codes=None):
+    if codes is None:
+        codes = {}
+    
+    if root is None:
+        return
+    
+    if root.char is not None:
+        codes[root.char] = current_code
+        return
+    
+    build_codes(root.left, current_code + "0", codes)
+    build_codes(root.right, current_code + "1", codes)
+    
+    return codes
+
+def huffman_encode(text):
+    if not text:
+        return "", {}
+    
+    frequency = build_frequency_dict(text)
+    root = build_huffman_tree(frequency)
+    codes = build_codes(root)
+    
+    encoded_text = ''.join([codes[char] for char in text])
+    return encoded_text, codes
+
+def serialize_huffman_tree(node):
+    if node is None:
+        return None
+    
+    if node.char is not None:
+        return {'char': node.char, 'freq': node.freq}
+    
+    return {
+        'left': serialize_huffman_tree(node.left),
+        'right': serialize_huffman_tree(node.right),
+        'freq': node.freq
+    }
 
 # Вспомогательные функции
 def token_required(f):
@@ -207,7 +280,6 @@ def login():
     }
 })
 def logout(current_user):
-    # В нашей реализации токен хранится на клиенте, поэтому просто возвращаем успех
     return jsonify({'message': 'Successfully logged out'}), 200
 
 @app.route('/user/<user_id>', methods=['PATCH'])
@@ -277,17 +349,14 @@ def delete_user(current_user, user_id):
     if str(current_user.id) != user_id:
         return jsonify({'message': 'You can only delete your own account'}), 403
     
-    # Удаляем все документы пользователя
     documents = Document.query.filter_by(user_id=current_user.id).all()
     for doc in documents:
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], doc.filename)
         if os.path.exists(filepath):
             os.remove(filepath)
     
-    # Удаляем все коллекции пользователя
     Collection.query.filter_by(user_id=current_user.id).delete()
     
-    # Удаляем самого пользователя
     db.session.delete(current_user)
     db.session.commit()
     
@@ -383,7 +452,6 @@ def get_document_statistics(current_user, document_id):
     if document.user_id != current_user.id:
         return jsonify({'message': 'You can only access your own documents'}), 403
     
-    # Получаем все коллекции, в которых есть этот документ
     collections = db.session.query(Collection).join(CollectionDocument).filter(
         CollectionDocument.document_id == document_id,
         Collection.user_id == current_user.id
@@ -392,15 +460,12 @@ def get_document_statistics(current_user, document_id):
     if not collections:
         return jsonify({'message': 'Document is not in any collection'}), 400
     
-    # Для простоты берем первую коллекцию
     collection = collections[0]
     
-    # Получаем все документы коллекции
     collection_docs = db.session.query(Document).join(CollectionDocument).filter(
         CollectionDocument.collection_id == collection.id
     ).all()
     
-    # Читаем содержимое всех документов
     documents_text = []
     for doc in collection_docs:
         content = get_document_text(doc.id)
@@ -410,19 +475,71 @@ def get_document_statistics(current_user, document_id):
     if not documents_text:
         return jsonify({'message': 'No valid documents in collection'}), 400
     
-    # Рассчитываем TF-IDF
     tfidf_scores = calculate_tfidf(documents_text)
     
-    # Находим индекс нашего документа в коллекции
     doc_index = next((i for i, doc in enumerate(collection_docs) if doc.id == document_id), None)
     if doc_index is None:
         return jsonify({'message': 'Document not found in collection'}), 500
     
-    # Берем топ-50 слов для этого документа
     top_words = tfidf_scores[doc_index][:50]
     
     return jsonify({
         'statistics': [{'word': word, 'tfidf': float(score)} for word, score in top_words]
+    }), 200
+
+@app.route('/documents/<document_id>/huffman', methods=['GET'])
+@token_required
+@swag_from({
+    'tags': ['Documents'],
+    'description': 'Get document content encoded with Huffman coding',
+    'parameters': [{
+        'name': 'document_id',
+        'in': 'path',
+        'type': 'string',
+        'required': True
+    }],
+    'security': [{'x-access-token': []}],
+    'responses': {
+        200: {
+            'description': 'Huffman encoded content',
+            'schema': {
+                'type': 'object',
+                'properties': {
+                    'encoded_text': {'type': 'string'},
+                    'codes': {
+                        'type': 'object',
+                        'additionalProperties': {'type': 'string'}
+                    },
+                    'compression_ratio': {'type': 'number'}
+                }
+            }
+        },
+        404: {'description': 'Document not found'},
+        403: {'description': 'Forbidden - not your document'}
+    }
+})
+def get_huffman_encoded_document(current_user, document_id):
+    document = Document.query.get(document_id)
+    if not document:
+        return jsonify({'message': 'Document not found'}), 404
+    
+    if document.user_id != current_user.id:
+        return jsonify({'message': 'You can only access your own documents'}), 403
+    
+    content = get_document_text(document_id)
+    if content is None:
+        return jsonify({'message': 'Could not read document file'}), 500
+    
+    encoded_text, codes = huffman_encode(content)
+    
+    original_size = len(content) * 8
+    compressed_size = len(encoded_text)
+    compression_ratio = original_size / compressed_size if compressed_size > 0 else 0
+    
+    return jsonify({
+        'encoded_text': encoded_text,
+        'codes': codes,
+        'compression_ratio': compression_ratio
     }), 200
 
 @app.route('/documents/<document_id>', methods=['DELETE'])
@@ -451,15 +568,12 @@ def delete_document(current_user, document_id):
     if document.user_id != current_user.id:
         return jsonify({'message': 'You can only delete your own documents'}), 403
     
-    # Удаляем файл
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], document.filename)
     if os.path.exists(filepath):
         os.remove(filepath)
     
-    # Удаляем связи с коллекциями
     CollectionDocument.query.filter_by(document_id=document_id).delete()
     
-    # Удаляем документ
     db.session.delete(document)
     db.session.commit()
     
@@ -579,12 +693,10 @@ def get_collection_statistics(current_user, collection_id):
     if collection.user_id != current_user.id:
         return jsonify({'message': 'You can only access your own collections'}), 403
     
-    # Получаем все документы коллекции
     documents = db.session.query(Document).join(CollectionDocument).filter(
         CollectionDocument.collection_id == collection.id
     ).all()
     
-    # Читаем содержимое всех документов и объединяем в один "документ"
     combined_text = []
     for doc in documents:
         content = get_document_text(doc.id)
@@ -594,13 +706,10 @@ def get_collection_statistics(current_user, collection_id):
     if not combined_text:
         return jsonify({'message': 'No valid documents in collection'}), 400
     
-    # Объединяем все документы в один для расчета TF
     combined_doc = ' '.join(combined_text)
     
-    # Рассчитываем TF-IDF для коллекции (IDF уже рассчитывается по всем документам коллекции)
     tfidf_scores = calculate_tfidf([combined_doc] + combined_text)
     
-    # Берем топ-50 слов для объединенного документа
     top_words = tfidf_scores[0][:50]
     
     return jsonify({
@@ -687,7 +796,6 @@ def add_document_to_collection(current_user, collection_id, document_id):
     if document.user_id != current_user.id:
         return jsonify({'message': 'You can only add your own documents'}), 403
     
-    # Проверяем, есть ли уже документ в коллекции
     existing = CollectionDocument.query.filter_by(
         collection_id=collection_id,
         document_id=document_id
@@ -696,7 +804,6 @@ def add_document_to_collection(current_user, collection_id, document_id):
     if existing:
         return jsonify({'message': 'Document already in collection'}), 400
     
-    # Добавляем документ в коллекцию
     new_link = CollectionDocument(collection_id=collection_id, document_id=document_id)
     db.session.add(new_link)
     db.session.commit()
@@ -745,7 +852,6 @@ def remove_document_from_collection(current_user, collection_id, document_id):
     if document.user_id != current_user.id:
         return jsonify({'message': 'You can only remove your own documents'}), 403
     
-    # Находим и удаляем связь
     link = CollectionDocument.query.filter_by(
         collection_id=collection_id,
         document_id=document_id
