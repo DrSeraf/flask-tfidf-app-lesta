@@ -1,11 +1,11 @@
-# Используем официальный Python-образ
+# Используем официальный минимальный образ Python
 FROM python:3.11-slim
 
-# Устанавливаем переменные окружения для Python
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
+# Переменные окружения для Python
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
-# Устанавливаем системные зависимости
+# Установка системных зависимостей
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     build-essential \
@@ -20,7 +20,7 @@ RUN apt-get update && \
 WORKDIR /app
 
 # Копируем зависимости
-COPY requirements.txt requirements.txt
+COPY requirements.txt .
 
 # Устанавливаем зависимости Python
 RUN pip install --no-cache-dir -r requirements.txt
@@ -28,18 +28,17 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Копируем все файлы приложения
 COPY . .
 
-# Копируем .env файл (если вы хотите, чтобы он попадал в контейнер)
-# Если переменные окружения будут передаваться через docker run --env-file, эту строку можно убрать
+# Копируем .env файл (если нужен внутри контейнера)
 COPY .env .env
 
-# Загружаем ресурсы NLTK (стоп-слова)
+# Загружаем стоп-слова NLTK (требуется для приложения)
 RUN python -m nltk.downloader stopwords
 
-# Указываем переменную окружения для шрифта
+# Переменная окружения для шрифта (если используется)
 ENV FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
 
-# Открываем порт (по умолчанию 5000, но можно изменить через .env)
-EXPOSE 5000
+# Открываем порт 5005 (как в app.run)
+EXPOSE 5005
 
-# Запускаем приложение
+# Запуск приложения
 CMD ["python", "app.py"]

@@ -6,4 +6,5 @@ python-dotenv==1.0.0
 pandas==2.2.3
 nltk==3.9.1
 flask_sqlalchemy==3.1.1
-flasgger==0.9.7
+flasgger==0.9.7.1
+
